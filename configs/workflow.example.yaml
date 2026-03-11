@@ -1,0 +1,19 @@
+input_glob: gee_tiles/*.tif
+output_dir: outputs/aca_reef_habitat_v2_0
+product_id: aca-reef-habitat-v2-0-mosaic
+collection_id: ACA/reef_habitat/v2_0
+extent_mode: union
+compression: ZSTD
+blocksize: 512
+bigtiff: IF_SAFER
+num_threads: ALL_CPUS
+overview_resampling: nearest
+keep_stage: false
+skip_cog: false
+validate_outputs: true
+write_catalog: true
+global_bounds:
+  - -180.0
+  - -33.0
+  - 180.0
+  - 33.0
