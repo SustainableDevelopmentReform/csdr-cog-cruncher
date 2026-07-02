@@ -134,7 +134,11 @@ def scan_tiles(input_glob: str) -> list[TileRecord]:
     return records
 
 
-def validate_inventory(records: list[TileRecord], tolerance: float = 1e-9) -> InventorySummary:
+def validate_inventory(
+    records: list[TileRecord],
+    tolerance: float = 1e-9,
+    alignment_tolerance: float = 1e-6,
+) -> InventorySummary:
     if not records:
         raise ValueError("Inventory is empty.")
 
@@ -163,8 +167,14 @@ def validate_inventory(records: list[TileRecord], tolerance: float = 1e-9) -> In
 
         col_offset = (record.left - origin_left) / resolution[0]
         row_offset = (origin_top - record.top) / resolution[1]
-        if abs(col_offset - round(col_offset)) > tolerance or abs(row_offset - round(row_offset)) > tolerance:
-            raise ValueError(f"Grid alignment mismatch for {record.name}")
+        col_alignment_error = abs(col_offset - round(col_offset))
+        row_alignment_error = abs(row_offset - round(row_offset))
+        if col_alignment_error > alignment_tolerance or row_alignment_error > alignment_tolerance:
+            raise ValueError(
+                f"Grid alignment mismatch for {record.name}: "
+                f"column error={col_alignment_error:.12g} pixels, "
+                f"row error={row_alignment_error:.12g} pixels"
+            )
 
         tile_window = (
             int(round(col_offset)),
