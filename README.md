@@ -60,6 +60,22 @@ when necessary and forwards all arguments to the CLI:
   --output-dir /data/output
 ```
 
+For a long SSH run, add `--detach`. The launcher uses `nohup`, redirects output
+to a log, and prints the background process ID and monitoring command. The run
+continues if the SSH session disconnects:
+
+```bash
+./scripts/run_workflow.sh --detach --config configs/seagrass-2023-2024.yaml
+```
+
+Logs are written to `logs/workflow-<timestamp>.log` by default. Use
+`--log-file` to choose a path:
+
+```bash
+./scripts/run_workflow.sh --detach --log-file logs/aca.log \
+  --config configs/aca-workstation.yaml
+```
+
 ## Worked Example: Allen Coral Atlas
 
 Stage-only run against the sample tiles:
