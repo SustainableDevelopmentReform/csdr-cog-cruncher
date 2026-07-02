@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import click
@@ -22,6 +23,15 @@ from csdr_cog_cruncher.workflow import run_workflow
 )
 @click.option("--skip-cog", is_flag=True, default=None, help="Keep only the sparse stage GeoTIFF.")
 @click.option("--keep-stage", is_flag=True, default=None, help="Preserve the sparse stage GeoTIFF.")
+@click.option("--compression", type=str, default=None, help="GeoTIFF compression, such as ZSTD or LZW.")
+@click.option("--blocksize", type=click.IntRange(min=16), default=None, help="Output tile width and height.")
+@click.option("--num-threads", type=str, default=None, help="GDAL thread count or ALL_CPUS.")
+@click.option(
+    "--overview-resampling",
+    type=click.Choice(["nearest", "average", "bilinear", "cubic"], case_sensitive=False),
+    default=None,
+    help="Overview resampling method.",
+)
 def main(
     config_path: Path | None,
     input_glob: str | None,
@@ -29,9 +39,14 @@ def main(
     extent_mode: str | None,
     skip_cog: bool | None,
     keep_stage: bool | None,
+    compression: str | None,
+    blocksize: int | None,
+    num_threads: str | None,
+    overview_resampling: str | None,
 ) -> None:
-    """Run the ACA tile merge workflow."""
+    """Merge tiled rasters into a sparse mosaic, COG, and STAC catalog."""
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config(
         config_path,
         overrides={
@@ -40,6 +55,10 @@ def main(
             "extent_mode": extent_mode.lower() if extent_mode else None,
             "skip_cog": skip_cog,
             "keep_stage": keep_stage,
+            "compression": compression,
+            "blocksize": blocksize,
+            "num_threads": num_threads,
+            "overview_resampling": overview_resampling.lower() if overview_resampling else None,
         },
     )
     result = run_workflow(config)
@@ -48,3 +67,7 @@ def main(
     click.echo(f"VRT: {result.vrt_path}")
     click.echo(f"Data: {result.data_path}")
     click.echo(f"STAC Item: {result.item_path}")
+
+
+if __name__ == "__main__":
+    main()

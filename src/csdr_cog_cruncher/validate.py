@@ -20,6 +20,8 @@ def validate_raster(path: Path, grid: GridSpec, summary: InventorySummary, *, re
             raise ValueError("Output raster band count does not match the source inventory.")
         if dataset.dtypes[0] != summary.dtype:
             raise ValueError("Output raster dtype does not match the source inventory.")
+        if dataset.nodata != summary.nodata:
+            raise ValueError("Output raster nodata value does not match the source inventory.")
         if dataset.crs != CRS.from_wkt(summary.crs_wkt):
             raise ValueError("Output raster CRS does not match the source inventory.")
         actual_bounds = tuple(float(value) for value in dataset.bounds)

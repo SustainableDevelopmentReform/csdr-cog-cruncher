@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 import json
 
 import yaml
+
+from csdr_cog_cruncher.metadata import aca_product_metadata
 
 
 @dataclass(slots=True)
@@ -27,7 +29,7 @@ class WorkflowConfig:
     skip_cog: bool = False
     validate_outputs: bool = True
     write_catalog: bool = True
-    source_metadata_path: Path = Path("instructions/ACA_reef_habitat_v2_0.jsonnet")
+    product_metadata: dict[str, Any] = field(default_factory=aca_product_metadata)
     inventory_filename: str = "inventory.json"
     grid_filename: str = "grid.json"
     vrt_filename: str = "mosaic.vrt"
@@ -67,7 +69,6 @@ class WorkflowConfig:
     def serializable_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["output_dir"] = str(self.output_dir)
-        payload["source_metadata_path"] = str(self.source_metadata_path)
         return payload
 
 
@@ -90,6 +91,13 @@ def _coerce_path(base_dir: Path, value: str | Path) -> Path:
     return (base_dir / path).resolve()
 
 
+def _coerce_glob(base_dir: Path, value: str) -> str:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str((base_dir / path).resolve())
+
+
 def load_config(config_path: Path | None = None, overrides: dict[str, Any] | None = None) -> WorkflowConfig:
     config = WorkflowConfig()
     data: dict[str, Any] = {}
@@ -99,12 +107,20 @@ def load_config(config_path: Path | None = None, overrides: dict[str, Any] | Non
     else:
         base_dir = Path.cwd()
 
-    if overrides:
-        data.update({key: value for key, value in overrides.items() if value is not None})
-
-    for path_key in ("output_dir", "source_metadata_path"):
+    for path_key in ("output_dir",):
         if path_key in data:
             data[path_key] = _coerce_path(base_dir, data[path_key])
+    if "input_glob" in data:
+        data["input_glob"] = _coerce_glob(base_dir, data["input_glob"])
+
+    if overrides:
+        override_data = {key: value for key, value in overrides.items() if value is not None}
+        for path_key in ("output_dir",):
+            if path_key in override_data:
+                override_data[path_key] = _coerce_path(Path.cwd(), override_data[path_key])
+        if "input_glob" in override_data:
+            override_data["input_glob"] = _coerce_glob(Path.cwd(), override_data["input_glob"])
+        data.update(override_data)
 
     if "global_bounds" in data:
         bounds = tuple(float(value) for value in data["global_bounds"])

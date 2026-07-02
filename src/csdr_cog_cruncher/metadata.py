@@ -1,6 +1,9 @@
-"""Static ACA metadata extracted from the source dataset definition."""
+"""Product metadata profiles and validation."""
 
 from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any
 
 ACA_COLLECTION_ID = "ACA/reef_habitat/v2_0"
 ACA_PRODUCT_TITLE = (
@@ -87,3 +90,53 @@ ACA_BANDS = [
         ),
     },
 ]
+
+ACA_PRODUCT_METADATA: dict[str, Any] = {
+    "title": ACA_PRODUCT_TITLE,
+    "description": ACA_PRODUCT_DESCRIPTION,
+    "license": ACA_LICENSE,
+    "keywords": ACA_KEYWORDS,
+    "providers": ACA_PROVIDERS,
+    "start_datetime": ACA_START_DATETIME,
+    "end_datetime": ACA_END_DATETIME,
+    "gsd": 5.0,
+    "doi": ACA_SCI_DOI,
+    "citation": ACA_SCI_CITATION,
+    "source_links": ACA_SOURCE_LINKS,
+    "bands": ACA_BANDS,
+}
+
+
+def aca_product_metadata() -> dict[str, Any]:
+    """Return an isolated copy suitable for a dataclass default factory."""
+
+    return deepcopy(ACA_PRODUCT_METADATA)
+
+
+def validate_product_metadata(metadata: dict[str, Any], band_count: int) -> dict[str, Any]:
+    """Validate the metadata fields consumed by the raster and STAC writers."""
+
+    required = {
+        "title",
+        "description",
+        "license",
+        "start_datetime",
+        "end_datetime",
+        "gsd",
+        "bands",
+    }
+    missing = sorted(required - metadata.keys())
+    if missing:
+        raise ValueError(f"Product metadata is missing required fields: {', '.join(missing)}")
+
+    bands = metadata["bands"]
+    if not isinstance(bands, list) or len(bands) != band_count:
+        raise ValueError(
+            f"Product metadata defines {len(bands) if isinstance(bands, list) else 0} "
+            f"bands, but the source tiles contain {band_count}."
+        )
+    for index, band in enumerate(bands, start=1):
+        if not isinstance(band, dict) or not band.get("name"):
+            raise ValueError(f"Product metadata band {index} must define a name.")
+
+    return deepcopy(metadata)

@@ -24,6 +24,7 @@ class TileRecord:
     height: int
     count: int
     dtype: str
+    nodata: float | None
     bounds: tuple[float, float, float, float]
     compression: str | None
     block_shapes: list[tuple[int, int]]
@@ -63,6 +64,7 @@ class TileRecord:
             "height": self.height,
             "count": self.count,
             "dtype": self.dtype,
+            "nodata": self.nodata,
             "bounds": list(self.bounds),
             "compression": self.compression,
             "block_shapes": [list(shape) for shape in self.block_shapes],
@@ -75,6 +77,7 @@ class InventorySummary:
     dtype: str
     count: int
     resolution: tuple[float, float]
+    nodata: float | None
     tile_count: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -83,6 +86,7 @@ class InventorySummary:
             "dtype": self.dtype,
             "count": self.count,
             "resolution": list(self.resolution),
+            "nodata": self.nodata,
             "tile_count": self.tile_count,
         }
 
@@ -102,6 +106,8 @@ def scan_tiles(input_glob: str) -> list[TileRecord]:
         with rasterio.open(path) as dataset:
             if len(set(dataset.dtypes)) != 1:
                 raise ValueError(f"Mixed band dtypes are not supported in {path.name}")
+            if len(set(dataset.nodatavals)) != 1:
+                raise ValueError(f"Mixed band nodata values are not supported in {path.name}")
             transform = dataset.transform
             record = TileRecord(
                 path=path.resolve(),
@@ -114,6 +120,7 @@ def scan_tiles(input_glob: str) -> list[TileRecord]:
                 height=dataset.height,
                 count=dataset.count,
                 dtype=dataset.dtypes[0],
+                nodata=dataset.nodatavals[0],
                 bounds=(
                     float(dataset.bounds.left),
                     float(dataset.bounds.bottom),
@@ -136,6 +143,7 @@ def validate_inventory(records: list[TileRecord], tolerance: float = 1e-9) -> In
     dtype = first.dtype
     count = first.count
     resolution = first.resolution
+    nodata = first.nodata
     origin_left = first.left
     origin_top = first.top
 
@@ -147,6 +155,8 @@ def validate_inventory(records: list[TileRecord], tolerance: float = 1e-9) -> In
             raise ValueError(f"Dtype mismatch for {record.name}")
         if record.count != count:
             raise ValueError(f"Band count mismatch for {record.name}")
+        if record.nodata != nodata:
+            raise ValueError(f"Nodata mismatch for {record.name}")
 
         if abs(record.resolution[0] - resolution[0]) > tolerance or abs(record.resolution[1] - resolution[1]) > tolerance:
             raise ValueError(f"Resolution mismatch for {record.name}")
@@ -177,6 +187,7 @@ def validate_inventory(records: list[TileRecord], tolerance: float = 1e-9) -> In
         dtype=dtype,
         count=count,
         resolution=resolution,
+        nodata=nodata,
         tile_count=len(records),
     )
 

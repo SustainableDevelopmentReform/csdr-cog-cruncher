@@ -50,6 +50,16 @@ You can also run from config:
 csdr-cog-cruncher --config configs/workflow.example.yaml
 ```
 
+For SSH and workstation use, the generic launcher bootstraps a local `.venv`
+when necessary and forwards all arguments to the CLI:
+
+```bash
+./scripts/run_workflow.sh \
+  --config configs/workflow.example.yaml \
+  --input-glob '/data/tiles/*.tif' \
+  --output-dir /data/output
+```
+
 ## Worked Example: Allen Coral Atlas
 
 Stage-only run against the sample tiles:
@@ -66,6 +76,39 @@ csdr-cog-cruncher --config configs/workflow.example.yaml
 
 The ACA sample tiles in [`gee_tiles/`](/gee_tiles) are the current development fixture for the workflow.
 
+## Worked Example: Global Seagrass
+
+The second profile uses the 2023-2024 layer from the
+[Global 10-meter seagrass maps](https://zenodo.org/records/18612240) dataset.
+Run the bundled sample tiles with:
+
+```bash
+./scripts/run_workflow.sh --config configs/seagrass-2023-2024.yaml
+```
+
+On the workstation, pass the full tile directory and output directory:
+
+```bash
+./scripts/run_workflow.sh \
+  --config configs/seagrass-2023-2024.yaml \
+  --input-glob '/data/seagrass_tiles/*.tif' \
+  --output-dir /data/seagrass_2023_2024
+```
+
+The launcher uses an 8 GB GDAL cache by default. Thread count, compression,
+block size, Python interpreter, and stage-only operation can be overridden:
+
+```bash
+GDAL_CACHEMAX=16384 ./scripts/run_workflow.sh --config configs/seagrass-2023-2024.yaml
+PYTHON=/path/to/python ./scripts/run_workflow.sh --config configs/seagrass-2023-2024.yaml
+./scripts/run_workflow.sh --config configs/seagrass-2023-2024.yaml \
+  --num-threads ALL_CPUS --compression ZSTD --blocksize 512
+./scripts/run_workflow.sh --config configs/seagrass-2023-2024.yaml \
+  --skip-cog --keep-stage
+```
+
+The pipeline is CPU-based; the GPU is not used by GDAL's GeoTIFF/COG codecs.
+
 ## Outputs
 
 Each run writes:
@@ -77,14 +120,16 @@ Each run writes:
 - `mosaic.tif` when COG conversion is enabled
 - `catalog.json`, `collection.json`, and the STAC Item JSON
 
-## Current Scope
+## Product Profiles
 
-The raster merge logic is general-purpose, but the bundled STAC metadata profile
-is currently tailored to the Allen Coral Atlas worked example in
-[`metadata.py`](/metadata.py).
-For other datasets, the merge pipeline is reusable as-is, but the metadata
-module should be adapted so titles, providers, temporal fields, keywords, and
-band descriptions match the new source data.
+Dataset-specific STAC metadata and band descriptions are supplied through the
+`product_metadata` section of a workflow config. Bundled profiles are in
+[`configs/workflow.example.yaml`](/configs/workflow.example.yaml) and
+[`configs/seagrass-2023-2024.yaml`](/configs/seagrass-2023-2024.yaml).
+
+The current sparse writer assumes zero-valued pixels are background. Inputs must
+share a CRS, resolution, dtype, band count, nodata value, and pixel grid, and
+tiles must not overlap. The VRT dtype mapping currently supports `uint8`.
 
 ## Notes
 

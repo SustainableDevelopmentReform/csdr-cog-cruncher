@@ -4,25 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pystac
+from rasterio.crs import CRS
+from rasterio.warp import transform_bounds
 from shapely.geometry import box, mapping
 
 from csdr_cog_cruncher.grid import GridSpec
-from csdr_cog_cruncher.metadata import (
-    ACA_BANDS,
-    ACA_COLLECTION_ID,
-    ACA_END_DATETIME,
-    ACA_KEYWORDS,
-    ACA_LICENSE,
-    ACA_PRODUCT_DESCRIPTION,
-    ACA_PRODUCT_TITLE,
-    ACA_PROVIDERS,
-    ACA_SCI_CITATION,
-    ACA_SCI_DOI,
-    ACA_SOURCE_LINKS,
-    ACA_START_DATETIME,
-)
+from csdr_cog_cruncher.metadata import ACA_COLLECTION_ID, aca_product_metadata
 
 
 def _parse_timestamp(value: str) -> datetime:
@@ -36,13 +26,24 @@ def build_catalog(
     data_path: Path,
     grid: GridSpec,
     collection_id: str = ACA_COLLECTION_ID,
+    product_metadata: dict[str, Any] | None = None,
+    dtype: str = "uint8",
     asset_media_type: str | None = None,
 ) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    geometry = mapping(box(*grid.bounds))
-    bbox = list(grid.bounds)
-    start = _parse_timestamp(ACA_START_DATETIME)
-    end = _parse_timestamp(ACA_END_DATETIME)
+    metadata = product_metadata or aca_product_metadata()
+    source_crs = CRS.from_wkt(grid.crs_wkt)
+    wgs84_bounds = transform_bounds(source_crs, "EPSG:4326", *grid.bounds, densify_pts=21)
+    geometry = mapping(box(*wgs84_bounds))
+    bbox = list(wgs84_bounds)
+    start_datetime = metadata["start_datetime"]
+    end_datetime = metadata["end_datetime"]
+    start = _parse_timestamp(start_datetime)
+    end = _parse_timestamp(end_datetime)
+    bands = metadata["bands"]
+    title = metadata["title"]
+    description = metadata["description"]
+    license_id = metadata["license"]
 
     item = pystac.Item(
         id=product_id,
@@ -50,16 +51,14 @@ def build_catalog(
         bbox=bbox,
         datetime=None,
         properties={
-            "title": ACA_PRODUCT_TITLE,
-            "description": ACA_PRODUCT_DESCRIPTION,
-            "start_datetime": ACA_START_DATETIME,
-            "end_datetime": ACA_END_DATETIME,
-            "gsd": 5.0,
-            "providers": ACA_PROVIDERS,
-            "keywords": ACA_KEYWORDS,
-            "license": ACA_LICENSE,
-            "sci:doi": ACA_SCI_DOI,
-            "sci:citation": ACA_SCI_CITATION,
+            "title": title,
+            "description": description,
+            "start_datetime": start_datetime,
+            "end_datetime": end_datetime,
+            "gsd": metadata["gsd"],
+            "providers": metadata.get("providers", []),
+            "keywords": metadata.get("keywords", []),
+            "license": license_id,
         },
     )
     item.stac_extensions = [
@@ -68,37 +67,42 @@ def build_catalog(
         "https://stac-extensions.github.io/raster/v1.1.0/schema.json",
         "https://stac-extensions.github.io/scientific/v1.0.0/schema.json",
     ]
-    item.properties["proj:epsg"] = 4326
+    epsg = source_crs.to_epsg()
+    if epsg is not None:
+        item.properties["proj:epsg"] = epsg
     item.properties["proj:shape"] = [grid.height, grid.width]
-    item.properties["proj:bbox"] = bbox
+    item.properties["proj:bbox"] = list(grid.bounds)
     item.properties["proj:transform"] = list(grid.transform_tuple())
-    item.properties["eo:bands"] = ACA_BANDS
+    item.properties["eo:bands"] = bands
+    if metadata.get("doi"):
+        item.properties["sci:doi"] = metadata["doi"]
+    if metadata.get("citation"):
+        item.properties["sci:citation"] = metadata["citation"]
 
     is_cog = (asset_media_type or pystac.MediaType.COG) == pystac.MediaType.COG
     asset = pystac.Asset(
         href=data_path.resolve().as_uri(),
         media_type=asset_media_type or pystac.MediaType.COG,
         roles=["data"],
-        title="Merged ACA habitat mosaic",
+        title=f"Merged {title}",
         description=(
-            "Merged sparse ACA reef habitat mosaic Cloud Optimized GeoTIFF."
+            f"Merged sparse {title} Cloud Optimized GeoTIFF."
             if is_cog
-            else "Merged sparse ACA reef habitat mosaic GeoTIFF stage product."
+            else f"Merged sparse {title} GeoTIFF stage product."
         ),
         extra_fields={
-            "eo:bands": ACA_BANDS,
+            "eo:bands": bands,
             "raster:bands": [
                 {
-                    "data_type": "uint8",
-                    "bits_per_sample": 8,
-                    "spatial_resolution": 5.0,
+                    "data_type": dtype,
+                    "spatial_resolution": metadata["gsd"],
                 }
-                for _ in ACA_BANDS
+                for _ in bands
             ],
         },
     )
     item.add_asset("data", asset)
-    for link_data in ACA_SOURCE_LINKS:
+    for link_data in metadata.get("source_links", []):
         item.add_link(pystac.Link(rel=link_data["rel"], target=link_data["href"]))
 
     extent = pystac.Extent(
@@ -107,21 +111,23 @@ def build_catalog(
     )
     collection = pystac.Collection(
         id=collection_id,
-        description=ACA_PRODUCT_DESCRIPTION,
+        description=description,
         extent=extent,
-        title=ACA_PRODUCT_TITLE,
-        license=ACA_LICENSE,
+        title=title,
+        license=license_id,
     )
     collection.add_item(item)
-    collection.extra_fields["providers"] = ACA_PROVIDERS
-    collection.extra_fields["keywords"] = ACA_KEYWORDS
-    collection.extra_fields["sci:doi"] = ACA_SCI_DOI
-    collection.extra_fields["sci:citation"] = ACA_SCI_CITATION
+    collection.extra_fields["providers"] = metadata.get("providers", [])
+    collection.extra_fields["keywords"] = metadata.get("keywords", [])
+    if metadata.get("doi"):
+        collection.extra_fields["sci:doi"] = metadata["doi"]
+    if metadata.get("citation"):
+        collection.extra_fields["sci:citation"] = metadata["citation"]
 
     catalog = pystac.Catalog(
         id=f"{product_id}-catalog",
-        description="Static STAC catalog for the merged ACA habitat mosaic.",
-        title=ACA_PRODUCT_TITLE,
+        description=f"Static STAC catalog for the merged {title} mosaic.",
+        title=title,
     )
     catalog.add_child(collection)
 

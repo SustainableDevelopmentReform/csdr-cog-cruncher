@@ -1,5 +1,5 @@
-input_glob: gee_tiles/*.tif
-output_dir: outputs/aca_reef_habitat_v2_0
+input_glob: ../gee_tiles/*.tif
+output_dir: ../outputs/aca_reef_habitat_v2_0
 product_id: aca-reef-habitat-v2-0-mosaic
 collection_id: ACA/reef_habitat/v2_0
 extent_mode: union

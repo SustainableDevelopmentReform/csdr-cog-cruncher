@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -13,7 +14,9 @@ from rasterio.windows import Window
 
 from csdr_cog_cruncher.grid import GridSpec, tile_window
 from csdr_cog_cruncher.inventory import InventorySummary, TileRecord
-from csdr_cog_cruncher.metadata import ACA_BANDS
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 VRT_DATA_TYPE_BY_DTYPE = {
@@ -39,7 +42,13 @@ class MergeStats:
         }
 
 
-def build_vrt(records: list[TileRecord], grid: GridSpec, summary: InventorySummary, path: Path) -> None:
+def build_vrt(
+    records: list[TileRecord],
+    grid: GridSpec,
+    summary: InventorySummary,
+    path: Path,
+    bands: list[dict[str, object]],
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     vrt_dataset = ET.Element(
         "VRTDataset",
@@ -56,7 +65,7 @@ def build_vrt(records: list[TileRecord], grid: GridSpec, summary: InventorySumma
         raise ValueError(f"Unsupported VRT data type mapping for dtype={summary.dtype!r}")
 
     for band_index in range(1, summary.count + 1):
-        band_meta = ACA_BANDS[band_index - 1]
+        band_meta = bands[band_index - 1]
         raster_band = ET.SubElement(
             vrt_dataset,
             "VRTRasterBand",
@@ -66,6 +75,9 @@ def build_vrt(records: list[TileRecord], grid: GridSpec, summary: InventorySumma
         )
         description = ET.SubElement(raster_band, "Description")
         description.text = band_meta["name"]
+        if summary.nodata is not None:
+            nodata_value = ET.SubElement(raster_band, "NoDataValue")
+            nodata_value.text = str(summary.nodata)
 
         for record in records:
             dst_window = tile_window(grid, record)
@@ -74,6 +86,9 @@ def build_vrt(records: list[TileRecord], grid: GridSpec, summary: InventorySumma
             source_filename.text = str(record.path)
             source_band = ET.SubElement(source, "SourceBand")
             source_band.text = str(band_index)
+            if summary.nodata is not None:
+                source_nodata = ET.SubElement(source, "NODATA")
+                source_nodata.text = str(summary.nodata)
             src_rect = ET.SubElement(
                 source,
                 "SrcRect",
@@ -108,6 +123,7 @@ def write_sparse_stage_mosaic(
     compression: str,
     bigtiff: str,
     num_threads: str,
+    bands: list[dict[str, object]],
 ) -> MergeStats:
     path.parent.mkdir(parents=True, exist_ok=True)
     profile = {
@@ -127,6 +143,8 @@ def write_sparse_stage_mosaic(
         "NUM_THREADS": num_threads,
         "SPARSE_OK": True,
     }
+    if summary.nodata is not None:
+        profile["nodata"] = summary.nodata
 
     total_source_blocks = 0
     written_blocks = 0
@@ -134,10 +152,11 @@ def write_sparse_stage_mosaic(
     nonzero_pixels_written = 0
 
     with rasterio.open(path, "w", **profile) as destination:
-        for band_index, band_meta in enumerate(ACA_BANDS, start=1):
+        for band_index, band_meta in enumerate(bands, start=1):
             destination.set_band_description(band_index, band_meta["name"])
 
-        for record in records:
+        for tile_index, record in enumerate(records, start=1):
+            LOGGER.info("Merging tile %d/%d: %s", tile_index, len(records), record.name)
             destination_window = tile_window(grid, record)
             with rasterio.open(record.path) as source:
                 for _, src_window in source.block_windows(1):
