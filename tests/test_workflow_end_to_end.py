@@ -1,7 +1,9 @@
+import json
 from pathlib import Path
 
 import numpy as np
 import pystac
+import pytest
 import rasterio
 from rasterio.transform import Affine
 
@@ -55,6 +57,13 @@ def test_workflow_builds_sparse_mosaic_and_stac(tmp_path: Path) -> None:
     assert result.vrt_path.exists()
     assert result.data_path.exists()
     assert result.item_path.exists()
+    assert result.item_path == config.item_path
+    assert result.completion_path.exists()
+
+    with result.completion_path.open(encoding="utf-8") as handle:
+        completion = json.load(handle)
+    assert completion["status"] == "complete"
+    assert completion["data_path"] == str(result.data_path)
 
     with rasterio.open(result.data_path) as dataset:
         assert dataset.width == 160
@@ -127,3 +136,19 @@ def test_workflow_supports_one_band_product_metadata_and_nodata(tmp_path: Path) 
     assert item.properties["title"] == "Test seagrass map"
     assert item.properties["sci:doi"] == "10.5281/zenodo.18612240"
     assert item.properties["eo:bands"][0]["name"] == "seagrass"
+    assert result.completion_path.exists()
+
+
+def test_failed_rerun_removes_stale_completion_marker(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    config = WorkflowConfig(
+        input_glob=str(tmp_path / "missing" / "*.tif"),
+        output_dir=output_dir,
+    )
+    config.completion_path.write_text('{"status": "complete"}', encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError, match="No tiles matched"):
+        run_workflow(config)
+
+    assert not config.completion_path.exists()

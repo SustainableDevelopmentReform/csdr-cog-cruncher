@@ -50,6 +50,12 @@ You can also run from config:
 csdr-cog-cruncher --config configs/workflow.example.yaml
 ```
 
+To see the exact output paths without starting any processing:
+
+```bash
+csdr-cog-cruncher --config configs/aca-workstation.yaml --show-outputs
+```
+
 For SSH and workstation use, the generic launcher bootstraps a local `.venv`
 when necessary and forwards all arguments to the CLI:
 
@@ -61,8 +67,8 @@ when necessary and forwards all arguments to the CLI:
 ```
 
 For a long SSH run, add `--detach`. The launcher uses `nohup`, redirects output
-to a log, and prints the background process ID and monitoring command. The run
-continues if the SSH session disconnects:
+to a log, and prints the expected output paths, background process ID, and
+monitoring command. The run continues if the SSH session disconnects:
 
 ```bash
 ./scripts/run_workflow.sh --detach --config configs/seagrass-2023-2024.yaml
@@ -74,6 +80,21 @@ Logs are written to `logs/workflow-<timestamp>.log` by default. Use
 ```bash
 ./scripts/run_workflow.sh --detach --log-file logs/aca.log \
   --config configs/aca-workstation.yaml
+```
+
+To submit both workstation products as independent background jobs:
+
+```bash
+./scripts/run_workstation_products.sh
+```
+
+This starts ACA reef and seagrass concurrently, gives each a timestamped log,
+and returns control to the shell after both jobs are submitted. Each process
+uses an 8 GB GDAL cache and `ALL_CPUS` by default. On a smaller workstation,
+cap both jobs when submitting them:
+
+```bash
+GDAL_CACHEMAX=4096 WORKFLOW_NUM_THREADS=8 ./scripts/run_workstation_products.sh
 ```
 
 ## Worked Example: Allen Coral Atlas
@@ -135,6 +156,24 @@ Each run writes:
 - `mosaic_stage.tif`
 - `mosaic.tif` when COG conversion is enabled
 - `catalog.json`, `collection.json`, and the STAC Item JSON
+- `build-manifest.json`
+- `workflow-complete.json`, written last and only after validation succeeds
+
+The stage file is removed after COG conversion unless `keep_stage` is enabled.
+The STAC collection and item are stored below collection/product subdirectories;
+the output plan printed at launch shows their exact paths.
+
+Use the completion marker rather than the presence of `mosaic.tif` to decide
+whether a run finished successfully. A raster can exist while it is still being
+written. For the two workstation profiles:
+
+```bash
+test -f outputs/aca_reef_habitat_v2_0/workflow-complete.json && echo "ACA complete"
+test -f outputs/seagrass_2023_2024/workflow-complete.json && echo "Seagrass complete"
+```
+
+The marker is removed when a new run starts, so a failed or active rerun cannot
+be mistaken for a completed one.
 
 ## Product Profiles
 

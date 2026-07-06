@@ -44,25 +44,6 @@ if [[ -n "${LOG_FILE}" && "${DETACH}" != true ]]; then
   exit 2
 fi
 
-if [[ "${DETACH}" == true ]]; then
-  if [[ -z "${LOG_FILE}" ]]; then
-    LOG_FILE="${REPO_ROOT}/logs/workflow-$(date +%Y%m%d-%H%M%S).log"
-  elif [[ "${LOG_FILE}" != /* ]]; then
-    LOG_FILE="${PWD}/${LOG_FILE}"
-  fi
-  mkdir -p -- "$(dirname -- "${LOG_FILE}")"
-
-  CSDR_WORKFLOW_DETACHED=1 nohup "${SCRIPT_DIR}/run_workflow.sh" "${WORKFLOW_ARGS[@]}" \
-    </dev/null >"${LOG_FILE}" 2>&1 &
-  WORKFLOW_PID=$!
-
-  echo "Workflow started in the background."
-  echo "PID: ${WORKFLOW_PID}"
-  echo "Log: ${LOG_FILE}"
-  printf 'Monitor: tail -f %q\n' "${LOG_FILE}"
-  exit 0
-fi
-
 if [[ -x "${VENV_DIR}/bin/python" && -z "${PYTHON:-}" ]]; then
   PYTHON_BIN="${VENV_DIR}/bin/python"
 else
@@ -80,6 +61,30 @@ if ! "${PYTHON_BIN}" -c 'import csdr_cog_cruncher' >/dev/null 2>&1; then
 fi
 
 export GDAL_CACHEMAX="${GDAL_CACHEMAX:-8192}"
+
+if [[ "${DETACH}" == true ]]; then
+  if [[ -z "${LOG_FILE}" ]]; then
+    LOG_FILE="${REPO_ROOT}/logs/workflow-$(date +%Y%m%d-%H%M%S).log"
+  elif [[ "${LOG_FILE}" != /* ]]; then
+    LOG_FILE="${PWD}/${LOG_FILE}"
+  fi
+  mkdir -p -- "$(dirname -- "${LOG_FILE}")"
+
+  (
+    cd "${REPO_ROOT}"
+    "${PYTHON_BIN}" -m csdr_cog_cruncher.cli "${WORKFLOW_ARGS[@]}" --show-outputs
+  )
+
+  CSDR_WORKFLOW_DETACHED=1 nohup "${SCRIPT_DIR}/run_workflow.sh" "${WORKFLOW_ARGS[@]}" \
+    </dev/null >"${LOG_FILE}" 2>&1 &
+  WORKFLOW_PID=$!
+
+  echo "Workflow submitted in the background."
+  echo "PID: ${WORKFLOW_PID}"
+  echo "Log: ${LOG_FILE}"
+  printf 'Monitor: tail -f %q\n' "${LOG_FILE}"
+  exit 0
+fi
 
 echo "GDAL cache: ${GDAL_CACHEMAX} MB"
 if [[ "${CSDR_WORKFLOW_DETACHED:-}" == 1 ]]; then

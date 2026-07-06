@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from csdr_cog_cruncher.config import load_config
-from csdr_cog_cruncher.workflow import run_workflow
+from csdr_cog_cruncher.workflow import output_plan_text, run_workflow
 
 
 @click.command()
@@ -32,6 +32,11 @@ from csdr_cog_cruncher.workflow import run_workflow
     default=None,
     help="Overview resampling method.",
 )
+@click.option(
+    "--show-outputs",
+    is_flag=True,
+    help="Print expected output paths and exit without running the workflow.",
+)
 def main(
     config_path: Path | None,
     input_glob: str | None,
@@ -43,6 +48,7 @@ def main(
     blocksize: int | None,
     num_threads: str | None,
     overview_resampling: str | None,
+    show_outputs: bool,
 ) -> None:
     """Merge tiled rasters into a sparse mosaic, COG, and STAC catalog."""
 
@@ -61,12 +67,17 @@ def main(
             "overview_resampling": overview_resampling.lower() if overview_resampling else None,
         },
     )
+    if show_outputs:
+        click.echo(output_plan_text(config))
+        return
+
     result = run_workflow(config)
     click.echo(f"Inventory: {result.inventory_path}")
     click.echo(f"Grid: {result.grid_path}")
     click.echo(f"VRT: {result.vrt_path}")
     click.echo(f"Data: {result.data_path}")
     click.echo(f"STAC Item: {result.item_path}")
+    click.echo(f"Success marker: {result.completion_path}")
 
 
 if __name__ == "__main__":

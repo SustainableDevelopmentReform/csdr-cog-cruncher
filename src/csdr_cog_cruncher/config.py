@@ -36,6 +36,7 @@ class WorkflowConfig:
     stage_filename: str = "mosaic_stage.tif"
     cog_filename: str = "mosaic.tif"
     manifest_filename: str = "build-manifest.json"
+    completion_filename: str = "workflow-complete.json"
     item_filename: str = "item.json"
 
     @property
@@ -63,8 +64,25 @@ class WorkflowConfig:
         return self.output_dir / self.manifest_filename
 
     @property
+    def completion_path(self) -> Path:
+        return self.output_dir / self.completion_filename
+
+    @property
+    def catalog_path(self) -> Path:
+        return self.output_dir / "catalog.json"
+
+    @property
+    def collection_path(self) -> Path:
+        return self.output_dir / self.collection_id / "collection.json"
+
+    @property
     def item_path(self) -> Path:
-        return self.output_dir / self.item_filename
+        return (
+            self.output_dir
+            / self.collection_id
+            / self.product_id
+            / f"{self.product_id}.json"
+        )
 
     def serializable_dict(self) -> dict[str, Any]:
         payload = asdict(self)

@@ -34,11 +34,50 @@ class WorkflowResult:
     collection_path: Path | None
     item_path: Path
     manifest_path: Path
+    completion_path: Path
     merge_stats: dict[str, Any]
+
+
+def planned_outputs(config: WorkflowConfig) -> list[tuple[str, Path]]:
+    """Return the paths a successful run is expected to leave on disk."""
+
+    data_path = config.stage_path if config.skip_cog else config.cog_path
+    outputs = [
+        ("Inventory", config.inventory_path),
+        ("Grid", config.grid_path),
+        ("VRT", config.vrt_path),
+        ("Final raster", data_path),
+        ("Build manifest", config.manifest_path),
+    ]
+    if config.keep_stage and not config.skip_cog:
+        outputs.append(("Preserved stage raster", config.stage_path))
+    if config.write_catalog:
+        outputs.extend(
+            [
+                ("STAC catalog", config.catalog_path),
+                ("STAC collection", config.collection_path),
+                ("STAC item", config.item_path),
+            ]
+        )
+    outputs.append(("SUCCESS MARKER (written last)", config.completion_path))
+    return outputs
+
+
+def output_plan_text(config: WorkflowConfig) -> str:
+    """Format expected output paths for terminal and log display."""
+
+    lines = ["Expected files after a successful run:"]
+    lines.extend(f"  {label}: {path}" for label, path in planned_outputs(config))
+    lines.append(f"Completion check: test -f {config.completion_path!s}")
+    return "\n".join(lines)
 
 
 def run_workflow(config: WorkflowConfig) -> WorkflowResult:
     config.output_dir.mkdir(parents=True, exist_ok=True)
+    # A marker from an earlier run must never make an active or failed rerun look complete.
+    config.completion_path.unlink(missing_ok=True)
+
+    LOGGER.info("\n%s", output_plan_text(config))
 
     LOGGER.info("Scanning and validating source tiles: %s", config.input_glob)
     records = scan_tiles(config.input_glob)
@@ -109,6 +148,7 @@ def run_workflow(config: WorkflowConfig) -> WorkflowResult:
         "catalog_path": str(catalog_path) if catalog_path else None,
         "collection_path": str(collection_path) if collection_path else None,
         "item_path": str(item_path),
+        "completion_path": str(config.completion_path),
         "merge_stats": merge_stats.to_dict(),
     }
     with config.manifest_path.open("w", encoding="utf-8") as handle:
@@ -127,7 +167,23 @@ def run_workflow(config: WorkflowConfig) -> WorkflowResult:
     if not config.keep_stage and not config.skip_cog and config.stage_path.exists():
         config.stage_path.unlink()
 
+    completion = {
+        "status": "complete",
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "product_id": config.product_id,
+        "data_path": str(data_path),
+        "manifest_path": str(config.manifest_path),
+        "item_path": str(item_path) if config.write_catalog else None,
+    }
+    completion_tmp_path = config.completion_path.with_suffix(
+        f"{config.completion_path.suffix}.tmp"
+    )
+    with completion_tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(completion, handle, indent=2)
+    completion_tmp_path.replace(config.completion_path)
+
     LOGGER.info("Workflow complete: %s", data_path)
+    LOGGER.info("Success marker written last: %s", config.completion_path)
 
     return WorkflowResult(
         inventory_path=config.inventory_path,
@@ -139,5 +195,6 @@ def run_workflow(config: WorkflowConfig) -> WorkflowResult:
         collection_path=collection_path,
         item_path=item_path,
         manifest_path=config.manifest_path,
+        completion_path=config.completion_path,
         merge_stats=merge_stats.to_dict(),
     )
