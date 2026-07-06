@@ -1,0 +1,65 @@
+input_glob: ../sg_tiles2/*.tif
+output_dir: ../outputs/seagrass_2019_2020
+product_id: global-seagrass-2019-2020-mosaic
+collection_id: global-seagrass-10m
+extent_mode: union
+compression: ZSTD
+blocksize: 512
+bigtiff: IF_SAFER
+num_threads: ALL_CPUS
+overview_resampling: nearest
+keep_stage: false
+skip_cog: false
+validate_outputs: true
+write_catalog: true
+global_bounds:
+  - -180.0
+  - -90.0
+  - 180.0
+  - 90.0
+product_metadata:
+  title: Global 10-meter seagrass extent map, 2019-2020
+  description: >-
+    Global shallow-water seagrass extent for 2019-2020 at 10 m nominal spatial
+    resolution. This derivative merges the tiled source GeoTIFFs into one sparse
+    Cloud Optimized GeoTIFF for workstation-scale analysis.
+  license: CC-BY-4.0
+  keywords:
+    - seagrass
+    - coastal ecosystems
+    - blue carbon
+    - remote sensing
+    - global
+  providers:
+    - name: Jianghai Peng
+      roles: [producer]
+    - name: Jiwei Li
+      roles: [producer]
+    - name: Johannes Krause
+      roles: [producer]
+    - name: Mitchell Lyons
+      roles: [producer]
+    - name: Nicholas Murray
+      roles: [producer]
+    - name: Steven Schill
+      roles: [producer]
+    - name: Chris Roelfsema
+      roles: [producer]
+    - name: Gregory Asner
+      roles: [producer]
+  start_datetime: "2019-01-01T00:00:00Z"
+  end_datetime: "2020-12-31T23:59:59Z"
+  gsd: 10.0
+  doi: 10.5281/zenodo.18612240
+  citation: >-
+    Peng, J., Li, J., Krause, J., Lyons, M., Murray, N., Schill, S.,
+    Roelfsema, C., & Asner, G. (2026). Global 10-meter seagrass maps
+    [Data set]. Zenodo. https://doi.org/10.5281/zenodo.18612240
+  source_links:
+    - rel: source
+      href: https://zenodo.org/records/18612240
+    - rel: cite-as
+      href: https://doi.org/10.5281/zenodo.18612240
+  bands:
+    - name: seagrass
+      description: Binary seagrass extent; 1 is mapped seagrass and 0 is background or nodata.
