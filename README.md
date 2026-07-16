@@ -31,11 +31,16 @@ python3 -m pip install -e .
 
 ## General Usage
 
-Run with a custom glob and output directory:
+Choose a product profile, then optionally override its input and output paths:
 
 ```bash
-csdr-cog-cruncher --input-glob '/path/to/tiles/*.tif' --output-dir /path/to/output
+csdr-cog-cruncher --config configs/workflow.example.yaml \
+  --input-glob '/path/to/tiles/*.tif' --output-dir /path/to/output
 ```
+
+A config is required because every product must explicitly declare its
+`product_id`, `collection_id`, and `product_metadata`; there is no implicit ACA
+profile in the generic Python code.
 
 Useful options:
 
@@ -44,7 +49,7 @@ Useful options:
 - `--skip-cog` to stop after building the sparse staged GeoTIFF
 - `--keep-stage` to preserve the staged GeoTIFF after COG conversion
 
-You can also run from config:
+To use all paths and settings from a config:
 
 ```bash
 csdr-cog-cruncher --config configs/workflow.example.yaml
@@ -175,12 +180,44 @@ test -f outputs/seagrass_2023_2024/workflow-complete.json && echo "Seagrass comp
 The marker is removed when a new run starts, so a failed or active rerun cannot
 be mistaken for a completed one.
 
+The STAC Item's data asset is written with the public HTTPS URL as its primary
+href and an `s3://` alternate, rather than a path on the build machine. Override
+the defaults per profile with `href_base` and `s3_base` (set `s3_base: null` to
+disable the alternate).
+
+## Rebuilding and Merging STAC
+
+STAC can be rebuilt from an existing run's `grid.json` and `mosaic.tif` without
+re-running the expensive mosaic step:
+
+```bash
+.venv/bin/python scripts/rebuild_catalog.py \
+  --config configs/seagrass-2019-2020.yaml \
+  --run outputs/seagrass_2019_2020
+```
+
+Combine independently indexable epochs into one multi-temporal collection with
+one Item per epoch:
+
+```bash
+.venv/bin/python scripts/merge_stac.py \
+  outputs/seagrass_2019_2020 outputs/seagrass_2023_2024 \
+  --config configs/seagrass-2023-2024.yaml \
+  --out outputs/seagrass_multitemporal
+```
+
+Published Items contain one representative `datetime` and no item-level
+`start_datetime`/`end_datetime`. The true coverage remains in the Collection's
+temporal extent, including the overall span and each epoch. The representative
+instant defaults to the span midpoint and can be set exactly with
+`product_metadata.datetime`.
+
 ## Product Profiles
 
 Dataset-specific STAC metadata and band descriptions are supplied through the
-`product_metadata` section of a workflow config. Bundled profiles are in
-[`configs/workflow.example.yaml`](/configs/workflow.example.yaml) and
-[`configs/seagrass-2023-2024.yaml`](/configs/seagrass-2023-2024.yaml).
+required `product_metadata` section of a workflow config. `collection_title`
+and `collection_description` can provide stable collection-level text when Item
+titles vary by epoch. Bundled profiles are in [`configs/`](/configs).
 
 The current sparse writer assumes zero-valued pixels are background. Inputs must
 share a CRS, resolution, dtype, band count, nodata value, and pixel grid, and

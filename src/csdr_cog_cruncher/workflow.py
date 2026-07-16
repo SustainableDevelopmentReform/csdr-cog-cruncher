@@ -130,6 +130,8 @@ def run_workflow(config: WorkflowConfig) -> WorkflowResult:
             collection_id=config.collection_id,
             product_metadata=product_metadata,
             dtype=summary.dtype,
+            https_base=config.href_base,
+            s3_base=config.s3_base,
             asset_media_type=(
                 pystac.MediaType.COG
                 if not config.skip_cog

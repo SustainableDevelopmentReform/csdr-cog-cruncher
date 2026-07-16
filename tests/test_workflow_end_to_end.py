@@ -11,6 +11,22 @@ from csdr_cog_cruncher.config import WorkflowConfig
 from csdr_cog_cruncher.workflow import run_workflow
 
 
+THREE_BAND_METADATA = {
+    "title": "Test habitat map",
+    "description": "Three-band test product.",
+    "license": "CC-BY-4.0",
+    "start_datetime": "2019-01-01T00:00:00Z",
+    "end_datetime": "2020-12-31T23:59:59Z",
+    "datetime": "2020-01-01T00:00:00Z",
+    "gsd": 5.0,
+    "bands": [
+        {"name": "geomorphic"},
+        {"name": "benthic"},
+        {"name": "reef_mask"},
+    ],
+}
+
+
 def _write_tile(path: Path, transform: Affine, values: tuple[int, int, int]) -> None:
     data = np.zeros((3, 64, 64), dtype=np.uint8)
     data[0, 8:24, 8:24] = values[0]
@@ -47,8 +63,13 @@ def test_workflow_builds_sparse_mosaic_and_stac(tmp_path: Path) -> None:
     config = WorkflowConfig(
         input_glob=str(source_dir / "*.tif"),
         output_dir=output_dir,
+        product_id="test-habitat",
+        collection_id="test-habitat-collection",
+        product_metadata=THREE_BAND_METADATA,
         keep_stage=True,
         compression="LZW",
+        href_base="https://example.test/products",
+        s3_base="s3://example-products",
     )
     result = run_workflow(config)
 
@@ -78,6 +99,24 @@ def test_workflow_builds_sparse_mosaic_and_stac(tmp_path: Path) -> None:
     item = pystac.Item.from_file(str(result.item_path))
     assert item.id == config.product_id
     assert "data" in item.assets
+
+    # The catalog has to be usable by whoever reads it after publication, so the asset is
+    # addressed by its published URL - never the local path it was written to, which would also
+    # leak the build machine's layout.
+    asset = item.assets["data"]
+    assert asset.href == "https://example.test/products/output/mosaic.tif"
+    assert not asset.href.startswith("file://")
+    assert asset.extra_fields["alternate"]["s3"]["href"] == (
+        "s3://example-products/output/mosaic.tif"
+    )
+    assert any("alternate-assets" in extension for extension in item.stac_extensions)
+
+    # One representative instant, no start/end range: rustac ignores `datetime` whenever a range
+    # is also present, and then a plain `datetime=<year>` search silently matches nothing.
+    assert item.datetime is not None
+    assert item.datetime.isoformat() == "2020-01-01T00:00:00+00:00"
+    assert "start_datetime" not in item.properties
+    assert "end_datetime" not in item.properties
 
 
 def test_workflow_supports_one_band_product_metadata_and_nodata(tmp_path: Path) -> None:
@@ -145,6 +184,9 @@ def test_failed_rerun_removes_stale_completion_marker(tmp_path: Path) -> None:
     config = WorkflowConfig(
         input_glob=str(tmp_path / "missing" / "*.tif"),
         output_dir=output_dir,
+        product_id="test-habitat",
+        collection_id="test-habitat-collection",
+        product_metadata=THREE_BAND_METADATA,
     )
     config.completion_path.write_text('{"status": "complete"}', encoding="utf-8")
 

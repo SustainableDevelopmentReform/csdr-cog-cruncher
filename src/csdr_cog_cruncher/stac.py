@@ -12,11 +12,36 @@ from rasterio.warp import transform_bounds
 from shapely.geometry import box, mapping
 
 from csdr_cog_cruncher.grid import GridSpec
-from csdr_cog_cruncher.metadata import ACA_COLLECTION_ID, aca_product_metadata
+from csdr_cog_cruncher.publish import (
+    DEFAULT_HTTPS_BASE,
+    DEFAULT_S3_BASE,
+    set_published_asset,
+)
 
 
 def _parse_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def nominal_datetime(metadata: dict[str, Any], start: datetime, end: datetime) -> datetime:
+    """The single representative instant to publish as an item's `datetime`.
+
+    A composite covers a span, so `datetime: null` plus start_datetime/end_datetime is the
+    natural STAC encoding. It is not usable in practice: rustac (which backs the csdr
+    STAC-Geoparquet index) ignores `datetime` whenever an item also carries a start/end range,
+    and then only matches a query interval that *contains* the item's whole range - so an
+    ordinary `datetime=2020` search silently matches nothing and every downstream area comes
+    back as 0. Publishing one representative instant keeps items searchable by year, the way
+    every other indexed dataset behaves. The true span is still declared by the collection's
+    temporal extent.
+
+    Defaults to the midpoint of the span, which for a two-calendar-year composite lands on
+    1 January of the later year. Set `datetime` in product metadata to override.
+    """
+    override = metadata.get("datetime")
+    if override is not None:
+        return _parse_timestamp(override)
+    return start + (end - start) / 2
 
 
 def build_catalog(
@@ -25,13 +50,15 @@ def build_catalog(
     product_id: str,
     data_path: Path,
     grid: GridSpec,
-    collection_id: str = ACA_COLLECTION_ID,
-    product_metadata: dict[str, Any] | None = None,
+    collection_id: str,
+    product_metadata: dict[str, Any],
     dtype: str = "uint8",
     asset_media_type: str | None = None,
+    https_base: str = DEFAULT_HTTPS_BASE,
+    s3_base: str | None = DEFAULT_S3_BASE,
 ) -> tuple[Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    metadata = product_metadata or aca_product_metadata()
+    metadata = product_metadata
     source_crs = CRS.from_wkt(grid.crs_wkt)
     wgs84_bounds = transform_bounds(source_crs, "EPSG:4326", *grid.bounds, densify_pts=21)
     geometry = mapping(box(*wgs84_bounds))
@@ -49,12 +76,12 @@ def build_catalog(
         id=product_id,
         geometry=geometry,
         bbox=bbox,
-        datetime=None,
+        # One representative instant rather than a start/end range - see nominal_datetime().
+        # The span is preserved on the collection's temporal extent below.
+        datetime=nominal_datetime(metadata, start, end),
         properties={
             "title": title,
             "description": description,
-            "start_datetime": start_datetime,
-            "end_datetime": end_datetime,
             "gsd": metadata["gsd"],
             "providers": metadata.get("providers", []),
             "keywords": metadata.get("keywords", []),
@@ -102,6 +129,9 @@ def build_catalog(
         },
     )
     item.add_asset("data", asset)
+    # Address the COG by its published URL rather than the local path it was just written to, so
+    # this catalog is usable by anyone who reads it and carries nothing about the build machine.
+    set_published_asset(item, output_dir.name, https_base=https_base, s3_base=s3_base)
     for link_data in metadata.get("source_links", []):
         item.add_link(pystac.Link(rel=link_data["rel"], target=link_data["href"]))
 
@@ -111,9 +141,9 @@ def build_catalog(
     )
     collection = pystac.Collection(
         id=collection_id,
-        description=description,
+        description=metadata.get("collection_description", description),
         extent=extent,
-        title=title,
+        title=metadata.get("collection_title", title),
         license=license_id,
     )
     collection.add_item(item)

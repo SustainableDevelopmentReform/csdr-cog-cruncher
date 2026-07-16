@@ -1,120 +1,34 @@
-"""Product metadata profiles and validation."""
+"""Product metadata validation.
+
+Product identity belongs in workflow configuration, not in this generic module.
+"""
 
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from typing import Any
 
-ACA_COLLECTION_ID = "ACA/reef_habitat/v2_0"
-ACA_PRODUCT_TITLE = (
-    "Allen Coral Atlas (ACA) - Geomorphic Zonation and Benthic Habitat - v2.0"
-)
-ACA_PRODUCT_DESCRIPTION = (
-    "Global Allen Coral Atlas shallow coral reef habitat layers composed of "
-    "geomorphic zonation, benthic habitat, and reef extent classes at 5 m nominal "
-    "resolution. This derivative product merges sparse source tiles into one "
-    "Cloud Optimized GeoTIFF for workstation-scale analysis."
-)
-ACA_LICENSE = "CC-BY-4.0"
-ACA_KEYWORDS = [
-    "coral",
-    "ocean",
-    "planet_derived",
-    "reef",
-    "seagrass",
-    "sentinel2_derived",
-]
-ACA_PROVIDERS = [
-    {
-        "name": "Allen Coral Atlas Partnership (ACA)",
-        "roles": ["producer"],
-        "url": "https://allencoralatlas.org/",
-    },
-    {
-        "name": "University of Queensland (UQ)",
-        "roles": ["licensor", "producer"],
-        "url": "https://www.uq.edu.au/",
-    },
-    {
-        "name": "Arizona State University Center for Global Discovery and Conservation Science (ASU GDCS)",
-        "roles": ["licensor", "producer"],
-        "url": "https://gdcs.asu.edu/",
-    },
-    {
-        "name": "Coral Reef Alliance (CORAL)",
-        "roles": ["licensor", "producer"],
-        "url": "https://coral.org/en/",
-    },
-    {
-        "name": "Planet",
-        "roles": ["licensor", "producer"],
-        "url": "https://www.planet.com/",
-    },
-    {
-        "name": "Vulcan Inc. (Vulcan)",
-        "roles": ["licensor", "producer"],
-        "url": "https://vulcan.com/",
-    },
-]
-ACA_START_DATETIME = "2018-01-01T00:00:00Z"
-ACA_END_DATETIME = "2021-01-01T00:00:00Z"
-ACA_SCI_DOI = "10.5281/zenodo.3833242"
-ACA_SCI_CITATION = (
-    "Allen Coral Atlas (2020). Imagery, maps and monitoring of the world's "
-    "tropical coral reefs. Zenodo. doi:10.5281/zenodo.3833242."
-)
-ACA_SOURCE_LINKS = [
-    {
-        "rel": "source",
-        "href": "https://storage.googleapis.com/coral-atlas-user-downloads-prod/Global-Dataset-20211006223100.zip",
-    },
-    {
-        "rel": "cite-as",
-        "href": "https://doi.org/10.5281/zenodo.3833242",
-    },
-]
-ACA_BANDS = [
-    {
-        "name": "geomorphic",
-        "description": "Classification of geomorphic zonation.",
-    },
-    {
-        "name": "benthic",
-        "description": "Classification of dominant benthic composition.",
-    },
-    {
-        "name": "reef_mask",
-        "description": (
-            "Globally standardised reef extent product integrating reef "
-            "classification and bathymetry products."
-        ),
-    },
-]
 
-ACA_PRODUCT_METADATA: dict[str, Any] = {
-    "title": ACA_PRODUCT_TITLE,
-    "description": ACA_PRODUCT_DESCRIPTION,
-    "license": ACA_LICENSE,
-    "keywords": ACA_KEYWORDS,
-    "providers": ACA_PROVIDERS,
-    "start_datetime": ACA_START_DATETIME,
-    "end_datetime": ACA_END_DATETIME,
-    "gsd": 5.0,
-    "doi": ACA_SCI_DOI,
-    "citation": ACA_SCI_CITATION,
-    "source_links": ACA_SOURCE_LINKS,
-    "bands": ACA_BANDS,
-}
-
-
-def aca_product_metadata() -> dict[str, Any]:
-    """Return an isolated copy suitable for a dataclass default factory."""
-
-    return deepcopy(ACA_PRODUCT_METADATA)
+def _parse_datetime(value: Any, field_name: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Product metadata {field_name} must be an ISO 8601 string.")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(
+            f"Product metadata {field_name} must be a valid ISO 8601 datetime."
+        ) from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"Product metadata {field_name} must include a timezone.")
+    return parsed
 
 
 def validate_product_metadata(metadata: dict[str, Any], band_count: int) -> dict[str, Any]:
     """Validate the metadata fields consumed by the raster and STAC writers."""
+
+    if not isinstance(metadata, dict):
+        raise ValueError("product_metadata must be a mapping.")
 
     required = {
         "title",
@@ -128,6 +42,30 @@ def validate_product_metadata(metadata: dict[str, Any], band_count: int) -> dict
     missing = sorted(required - metadata.keys())
     if missing:
         raise ValueError(f"Product metadata is missing required fields: {', '.join(missing)}")
+
+    for field_name in ("title", "description", "license"):
+        if not isinstance(metadata[field_name], str) or not metadata[field_name].strip():
+            raise ValueError(f"Product metadata {field_name} must be a non-empty string.")
+    for field_name in ("collection_title", "collection_description"):
+        if field_name in metadata and (
+            not isinstance(metadata[field_name], str) or not metadata[field_name].strip()
+        ):
+            raise ValueError(f"Product metadata {field_name} must be a non-empty string.")
+
+    start = _parse_datetime(metadata["start_datetime"], "start_datetime")
+    end = _parse_datetime(metadata["end_datetime"], "end_datetime")
+    if start >= end:
+        raise ValueError("Product metadata start_datetime must be before end_datetime.")
+    if metadata.get("datetime") is not None:
+        nominal = _parse_datetime(metadata["datetime"], "datetime")
+        if not start <= nominal <= end:
+            raise ValueError(
+                "Product metadata datetime must fall within start_datetime and end_datetime."
+            )
+
+    gsd = metadata["gsd"]
+    if not isinstance(gsd, (int, float)) or isinstance(gsd, bool) or gsd <= 0:
+        raise ValueError("Product metadata gsd must be a positive number.")
 
     bands = metadata["bands"]
     if not isinstance(bands, list) or len(bands) != band_count:

@@ -17,3 +17,59 @@ global_bounds:
   - -33.0
   - 180.0
   - 33.0
+product_metadata:
+  title: Allen Coral Atlas (ACA) - Geomorphic Zonation and Benthic Habitat - v2.0
+  description: >-
+    Global Allen Coral Atlas shallow coral reef habitat layers composed of
+    geomorphic zonation, benthic habitat, and reef extent classes at 5 m nominal
+    resolution. This derivative product merges sparse source tiles into one
+    Cloud Optimized GeoTIFF for workstation-scale analysis.
+  license: CC-BY-4.0
+  keywords:
+    - coral
+    - ocean
+    - planet_derived
+    - reef
+    - seagrass
+    - sentinel2_derived
+  providers:
+    - name: Allen Coral Atlas Partnership (ACA)
+      roles: [producer]
+      url: https://allencoralatlas.org/
+    - name: University of Queensland (UQ)
+      roles: [licensor, producer]
+      url: https://www.uq.edu.au/
+    - name: Arizona State University Center for Global Discovery and Conservation Science (ASU GDCS)
+      roles: [licensor, producer]
+      url: https://gdcs.asu.edu/
+    - name: Coral Reef Alliance (CORAL)
+      roles: [licensor, producer]
+      url: https://coral.org/en/
+    - name: Planet
+      roles: [licensor, producer]
+      url: https://www.planet.com/
+    - name: Vulcan Inc. (Vulcan)
+      roles: [licensor, producer]
+      url: https://vulcan.com/
+  start_datetime: "2018-01-01T00:00:00Z"
+  end_datetime: "2021-01-01T00:00:00Z"
+  datetime: "2020-01-01T00:00:00Z"
+  gsd: 5.0
+  doi: 10.5281/zenodo.3833242
+  citation: >-
+    Allen Coral Atlas (2020). Imagery, maps and monitoring of the world's
+    tropical coral reefs. Zenodo. doi:10.5281/zenodo.3833242.
+  source_links:
+    - rel: source
+      href: https://storage.googleapis.com/coral-atlas-user-downloads-prod/Global-Dataset-20211006223100.zip
+    - rel: cite-as
+      href: https://doi.org/10.5281/zenodo.3833242
+  bands:
+    - name: geomorphic
+      description: Classification of geomorphic zonation.
+    - name: benthic
+      description: Classification of dominant benthic composition.
+    - name: reef_mask
+      description: >-
+        Globally standardised reef extent product integrating reef
+        classification and bathymetry products.

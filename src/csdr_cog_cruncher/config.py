@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 import json
 
 import yaml
 
-from csdr_cog_cruncher.metadata import aca_product_metadata
+from csdr_cog_cruncher.publish import DEFAULT_HTTPS_BASE, DEFAULT_S3_BASE
 
 
 @dataclass(slots=True)
 class WorkflowConfig:
-    input_glob: str = "gee_tiles/*.tif"
-    output_dir: Path = Path("outputs/aca_reef_habitat_v2_0")
-    product_id: str = "aca-reef-habitat-v2-0-mosaic"
-    collection_id: str = "ACA/reef_habitat/v2_0"
+    input_glob: str
+    output_dir: Path
+    product_id: str
+    collection_id: str
+    product_metadata: dict[str, Any]
     extent_mode: str = "union"
-    global_bounds: tuple[float, float, float, float] = (-180.0, -33.0, 180.0, 33.0)
+    global_bounds: tuple[float, float, float, float] = (-180.0, -90.0, 180.0, 90.0)
     compression: str = "ZSTD"
     blocksize: int = 512
     bigtiff: str = "IF_SAFER"
@@ -29,7 +30,8 @@ class WorkflowConfig:
     skip_cog: bool = False
     validate_outputs: bool = True
     write_catalog: bool = True
-    product_metadata: dict[str, Any] = field(default_factory=aca_product_metadata)
+    href_base: str = DEFAULT_HTTPS_BASE
+    s3_base: str | None = DEFAULT_S3_BASE
     inventory_filename: str = "inventory.json"
     grid_filename: str = "grid.json"
     vrt_filename: str = "mosaic.vrt"
@@ -116,8 +118,10 @@ def _coerce_glob(base_dir: Path, value: str) -> str:
     return str((base_dir / path).resolve())
 
 
-def load_config(config_path: Path | None = None, overrides: dict[str, Any] | None = None) -> WorkflowConfig:
-    config = WorkflowConfig()
+def load_config(
+    config_path: Path | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> WorkflowConfig:
     data: dict[str, Any] = {}
     if config_path is not None:
         data.update(_load_mapping(config_path))
@@ -146,5 +150,20 @@ def load_config(config_path: Path | None = None, overrides: dict[str, Any] | Non
             raise ValueError("global_bounds must contain exactly four numeric values.")
         data["global_bounds"] = bounds
 
-    defaults = {field.name: getattr(config, field.name) for field in fields(WorkflowConfig)}
-    return WorkflowConfig(**{**defaults, **data})
+    required = ("input_glob", "output_dir", "product_id", "collection_id", "product_metadata")
+    missing = [key for key in required if key not in data]
+    if missing:
+        source = str(config_path) if config_path is not None else "workflow configuration"
+        raise ValueError(f"{source} is missing required fields: {', '.join(missing)}")
+
+    for key in ("product_id", "collection_id", "href_base"):
+        if key in data and (not isinstance(data[key], str) or not data[key].strip()):
+            raise ValueError(f"{key} must be a non-empty string.")
+    if (
+        "s3_base" in data
+        and data["s3_base"] is not None
+        and not isinstance(data["s3_base"], str)
+    ):
+        raise ValueError("s3_base must be a string or null.")
+
+    return WorkflowConfig(**data)

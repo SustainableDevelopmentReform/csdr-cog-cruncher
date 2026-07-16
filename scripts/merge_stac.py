@@ -8,8 +8,8 @@ one multi-temporal dataset rather than as separate single-timestamp catalogs.
 
 The idiomatic STAC model for multi-temporal data is *one item per epoch inside
 one collection* -- not one item carrying every epoch as separate assets. Each
-item keeps its own datetime interval and COG asset; the collection spans them
-all so clients can filter/stack by time.
+item keeps one representative datetime and its COG asset; the collection
+preserves every true epoch interval so clients can filter and stack by time.
 
 Asset hrefs are rewritten to where the COGs actually live (public S3 by
 default). The HTTPS URL is the primary href (readable by browsers, STAC
@@ -28,24 +28,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pystac
 
-# Public locations for the merged COGs. Each run's data asset resolves to
-# ``{base}/{run_dir_name}/{filename}`` -- matching the bucket layout the
-# outputs were synced into.
-DEFAULT_HTTPS_BASE = (
-    "https://csdr-public-datasets.s3.ap-southeast-2.amazonaws.com/cog-cruncher-outputs"
-)
-DEFAULT_S3_BASE = "s3://csdr-public-datasets/cog-cruncher-outputs"
+from csdr_cog_cruncher.config import load_config
 
-ALTERNATE_ASSETS_EXT = (
-    "https://stac-extensions.github.io/alternate-assets/v1.2.0/schema.json"
+# Where the COGs are published, shared with the per-run catalog writer so both address assets
+# identically.
+from csdr_cog_cruncher.publish import (
+    DEFAULT_HTTPS_BASE,
+    DEFAULT_S3_BASE,
+    set_published_asset,
 )
+
 SCIENTIFIC_EXT = "https://stac-extensions.github.io/scientific/v1.0.0/schema.json"
 
 # Collection-level fields carried verbatim from the source collections.
@@ -54,12 +52,6 @@ _CARRIED_COLLECTION_FIELDS = ("providers", "keywords", "sci:doi", "sci:citation"
 
 def _parse_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-
-
-def _strip_epoch_suffix(title: str) -> str:
-    """Drop a trailing ", 2019-2020"-style epoch from a per-run title."""
-
-    return re.sub(r",?\s*\d{4}\s*[-–]\s*\d{4}\s*$", "", title).strip()
 
 
 def _load_run(run_dir: Path) -> tuple[pystac.Item, dict[str, Any]]:
@@ -80,23 +72,55 @@ def _load_run(run_dir: Path) -> tuple[pystac.Item, dict[str, Any]]:
     return items[0], collection_dict
 
 
+def _run_epoch(
+    run_dir: Path, item: pystac.Item, collection_dict: dict[str, Any]
+) -> tuple[datetime, datetime]:
+    """The (start, end) span this run covers.
+
+    Read from the run's collection temporal extent, which is authoritative and present whether
+    or not the item still carries a start/end range of its own (older runs do, newer ones do
+    not - see _publish_single_datetime).
+    """
+    interval = collection_dict.get("extent", {}).get("temporal", {}).get("interval") or []
+    if interval and interval[0] and all(interval[0][:2]):
+        return _parse_timestamp(interval[0][0]), _parse_timestamp(interval[0][1])
+    # Fall back to the item's own range for hand-built runs with no collection extent.
+    start = item.properties.get("start_datetime")
+    end = item.properties.get("end_datetime")
+    if start and end:
+        return _parse_timestamp(start), _parse_timestamp(end)
+    raise SystemExit(
+        f"{run_dir}: cannot determine the epoch - no collection temporal extent and no "
+        "start_datetime/end_datetime on the item."
+    )
+
+
+def _publish_single_datetime(item: pystac.Item, epoch: tuple[datetime, datetime]) -> None:
+    """Publish the item with one representative `datetime` and no start/end range.
+
+    rustac (which backs the csdr STAC-Geoparquet index) ignores `datetime` whenever an item also
+    carries a start/end range, and then only matches a query interval that *contains* the item's
+    whole range - so an ordinary `datetime=2020` search matches nothing and every downstream area
+    comes back as 0. The span is not lost: this collection's temporal extent declares the overall
+    interval and each epoch.
+    """
+    start, end = epoch
+    if item.datetime is None:
+        item.datetime = start + (end - start) / 2
+    item.properties.pop("start_datetime", None)
+    item.properties.pop("end_datetime", None)
+
+
 def _rewrite_asset(
     item: pystac.Item, run_name: str, https_base: str, s3_base: str | None
 ) -> None:
-    """Point the data asset at its published location and add an s3 alternate."""
+    """Point the data asset at its published location and add an s3 alternate.
 
-    asset = item.assets["data"]
-    filename = asset.href.rstrip("/").rsplit("/", 1)[-1]
-    asset.href = f"{https_base.rstrip('/')}/{run_name}/{filename}"
-    if s3_base:
-        asset.extra_fields["alternate"] = {
-            "s3": {
-                "href": f"{s3_base.rstrip('/')}/{run_name}/{filename}",
-                "title": "S3 access",
-            }
-        }
-        if ALTERNATE_ASSETS_EXT not in item.stac_extensions:
-            item.stac_extensions.append(ALTERNATE_ASSETS_EXT)
+    Per-run catalogs already publish this way, so for them this is a no-op; it still matters for
+    older runs whose assets were written as local paths, and when a non-default base is passed.
+    """
+
+    set_published_asset(item, run_name, https_base=https_base, s3_base=s3_base)
 
 
 def _reset_structural_links(item: pystac.Item) -> None:
@@ -118,13 +142,27 @@ def merge(
     validate: bool,
 ) -> None:
     items: list[pystac.Item] = []
+    item_epochs: dict[str, tuple[datetime, datetime]] = {}
     source_collection: dict[str, Any] | None = None
+    source_titles: list[str | None] = []
+    seen_item_ids: set[str] = set()
     for run_dir in run_dirs:
         item, collection_dict = _load_run(run_dir)
+        source_titles.append(collection_dict.get("title"))
         if source_collection is None:
             source_collection = collection_dict
+        elif collection_dict["id"] != source_collection["id"]:
+            raise SystemExit(
+                f"{run_dir}: collection {collection_dict['id']!r} does not match "
+                f"{source_collection['id']!r}"
+            )
+        if item.id in seen_item_ids:
+            raise SystemExit(f"{run_dir}: duplicate STAC item id {item.id!r}")
+        seen_item_ids.add(item.id)
         _rewrite_asset(item, run_dir.name, https_base, s3_base)
         _reset_structural_links(item)
+        item_epochs[item.id] = _run_epoch(run_dir, item, collection_dict)
+        _publish_single_datetime(item, item_epochs[item.id])
         items.append(item)
 
     assert source_collection is not None
@@ -141,18 +179,20 @@ def merge(
     ]
 
     # Temporal extent: overall interval first, then each epoch (STAC spec).
-    epochs = [
-        (
-            _parse_timestamp(item.properties["start_datetime"]),
-            _parse_timestamp(item.properties["end_datetime"]),
-        )
-        for item in items
-    ]
+    # This collection is now the only place the per-epoch spans are declared, since the items
+    # publish a single representative datetime instead - see _publish_single_datetime.
+    epochs = [item_epochs[item.id] for item in items]
     epochs.sort(key=lambda pair: pair[0])
     overall = [min(s for s, _ in epochs), max(e for _, e in epochs)]
     intervals = [overall] + [list(pair) for pair in epochs]
 
-    base_title = _strip_epoch_suffix(items[0].properties.get("title", collection_id))
+    # Product configs may provide a stable collection title distinct from each epoch's item
+    # title. This avoids trying to infer product identity by parsing year-like title suffixes.
+    base_title = (
+        source_titles[0]
+        if source_titles[0] and len(set(source_titles)) == 1
+        else collection_id
+    )
     if title is None:
         title = f"{base_title} (multi-temporal, {overall[0].year}–{overall[1].year})"
     if description is None:
@@ -206,6 +246,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("runs", nargs="+", type=Path, help="Run output directories to merge")
     parser.add_argument(
+        "--config",
+        type=Path,
+        help="Product config supplying href_base and s3_base defaults",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=Path("outputs/seagrass_multitemporal"),
@@ -216,13 +261,13 @@ def main() -> None:
     parser.add_argument("--description", default=None, help="Override collection description")
     parser.add_argument(
         "--href-base",
-        default=DEFAULT_HTTPS_BASE,
-        help="Base URL for primary asset hrefs (default: public S3 HTTPS)",
+        default=None,
+        help="Override the config's primary asset URL base",
     )
     parser.add_argument(
         "--s3-base",
-        default=DEFAULT_S3_BASE,
-        help="Base s3:// URI for alternate asset hrefs; empty string to disable",
+        default=None,
+        help="Override the config's s3:// alternate base; empty string to disable",
     )
     parser.add_argument(
         "--validate",
@@ -231,14 +276,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    config = load_config(args.config) if args.config else None
+    https_base = args.href_base or (config.href_base if config else DEFAULT_HTTPS_BASE)
+    if args.s3_base is not None:
+        s3_base = args.s3_base or None
+    else:
+        s3_base = config.s3_base if config else DEFAULT_S3_BASE
+
     merge(
         args.runs,
         args.out,
         collection_id=args.collection_id,
         title=args.title,
         description=args.description,
-        https_base=args.href_base,
-        s3_base=args.s3_base or None,
+        https_base=https_base,
+        s3_base=s3_base,
         validate=args.validate,
     )
 

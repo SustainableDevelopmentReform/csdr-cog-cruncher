@@ -19,6 +19,10 @@ global_bounds:
   - 90.0
 product_metadata:
   title: Global 10-meter seagrass extent map, 2019-2020
+  collection_title: Global 10-meter seagrass extent maps
+  collection_description: >-
+    Global shallow-water seagrass extent time series at 10 m nominal spatial
+    resolution.
   description: >-
     Global shallow-water seagrass extent for 2019-2020 at 10 m nominal spatial
     resolution. This derivative merges the tiled source GeoTIFFs into one sparse
@@ -49,6 +53,7 @@ product_metadata:
       roles: [producer]
   start_datetime: "2019-01-01T00:00:00Z"
   end_datetime: "2020-12-31T23:59:59Z"
+  datetime: "2020-01-01T00:00:00Z"
   gsd: 10.0
   doi: 10.5281/zenodo.18612240
   citation: >-

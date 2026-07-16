@@ -12,7 +12,13 @@ from csdr_cog_cruncher.workflow import output_plan_text, run_workflow
 
 
 @click.command()
-@click.option("--config", "config_path", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Product workflow configuration.",
+)
 @click.option("--input-glob", type=str, default=None, help="Glob for source tiles.")
 @click.option("--output-dir", type=click.Path(path_type=Path), default=None, help="Output directory.")
 @click.option(
